@@ -1,0 +1,646 @@
+
+https://stackoverflow.com/questions/11867612/scsi-read-10-and-write-10-with-the-scsi-generic-interface
+
+
+https://github.com/hreinecke/sg3_utils/blob/d82f040c69689305ca1d318d3dc0e1e42ab6ffa3/examples/sgq_dd.c
+
+
+https://github.com/hreinecke/sg3_utils/blob/master/examples/sg_simple16.c
+
+
+
+
+
+
+
+ExternalAccessory read10的代码
+
+
+#import <ExternalAccessory/ExternalAccessory.h>
+#import <ExternalAccessory/EASession.h>
+
+#define BLOCK_SIZE 512
+#define LBA 0
+
+- (void)readSCSIBlock {
+    EAAccessory *accessory = /* Get the accessory object */;
+    EASession *session = [[EASession alloc] initWithAccessory:accessory forProtocol:@"your.protocol.id"];
+    NSData *cdb = [self generateCDBForRead10:LBA withBlockSize:BLOCK_SIZE];
+    NSData *data = [self sendSCSICommand:cdb toSession:session];
+    /* Handle the received data */
+}
+
+- (NSData *)generateCDBForRead10:(NSUInteger)lba withBlockSize:(NSUInteger)blockSize {
+    char cdb[10];
+    memset(cdb, 0, sizeof(cdb));
+    cdb[0] = 0x28; /* Read(10) */
+    cdb[2] = (unsigned char)(lba >> 24) & 0xff;
+    cdb[3] = (unsigned char)(lba >> 16) & 0xff;
+    cdb[4] = (unsigned char)(lba >> 8) & 0xff;
+    cdb[5] = (unsigned char)(lba & 0xff);
+    cdb[7] = (unsigned char)(blockSize >> 8) & 0xff;
+    cdb[8] = (unsigned char)(blockSize & 0xff);
+    return [NSData dataWithBytes:cdb length:sizeof(cdb)];
+}
+
+- (NSData *)sendSCSICommand:(NSData *)cdb toSession:(EASession *)session {
+    /* Write the CDB to the accessory */
+    [session.outputStream write:[cdb bytes] maxLength:[cdb length]];
+
+    /* Read the response from the accessory */
+    NSMutableData *data = [NSMutableData data];
+    uint8_t buffer[BLOCK_SIZE];
+    while ([session.inputStream hasBytesAvailable]) {
+        NSInteger bytesRead = [session.inputStream read:buffer maxLength:sizeof(buffer)];
+        [data appendBytes:buffer length:bytesRead];
+    }
+    return data;
+}
+
+
+
+ExternalAccessory write10的代码
+
+
+
+#import <ExternalAccessory/ExternalAccessory.h>
+#import <ExternalAccessory/EASession.h>
+
+#define BLOCK_SIZE 512
+#define LBA 0
+
+- (void)writeSCSIBlockWithData:(NSData *)data {
+    EAAccessory *accessory = /* Get the accessory object */;
+    EASession *session = [[EASession alloc] initWithAccessory:accessory forProtocol:@"your.protocol.id"];
+    NSData *cdb = [self generateCDBForWrite10:LBA withBlockSize:BLOCK_SIZE];
+    [self sendSCSICommand:cdb withData:data toSession:session];
+}
+
+- (NSData *)generateCDBForWrite10:(NSUInteger)lba withBlockSize:(NSUInteger)blockSize {
+    char cdb[10];
+    memset(cdb, 0, sizeof(cdb));
+    cdb[0] = 0x2A; /* Write(10) */
+    cdb[2] = (unsigned char)(lba >> 24) & 0xff;
+    cdb[3] = (unsigned char)(lba >> 16) & 0xff;
+    cdb[4] = (unsigned char)(lba >> 8) & 0xff;
+    cdb[5] = (unsigned char)(lba & 0xff);
+    cdb[7] = (unsigned char)(blockSize >> 8) & 0xff;
+    cdb[8] = (unsigned char)(blockSize & 0xff);
+    return [NSData dataWithBytes:cdb length:sizeof(cdb)];
+}
+
+- (void)sendSCSICommand:(NSData *)cdb withData:(NSData *)data toSession:(EASession *)session {
+    /* Write the CDB to the accessory */
+    [session.outputStream write:[cdb bytes] maxLength:[cdb length]];
+
+    /* Write the data to the accessory */
+    [session.outputStream write:[data bytes] maxLength:[data length]];
+}
+
+
+
+ExternalAccessory 多扇区写的代码
+
+#import <ExternalAccessory/ExternalAccessory.h>
+#import <ExternalAccessory/EASession.h>
+
+#define BLOCK_SIZE 512
+#define LBA 0
+#define NUM_BLOCKS 2
+
+- (void)writeSCSIBlocksWithData:(NSData *)data {
+    EAAccessory *accessory = /* Get the accessory object */;
+    EASession *session = [[EASession alloc] initWithAccessory:accessory forProtocol:@"your.protocol.id"];
+    NSUInteger dataLength = [data length];
+    NSUInteger dataIndex = 0;
+    for (int i = 0; i < NUM_BLOCKS; i++) {
+        if (dataIndex >= dataLength) break;
+        NSUInteger blockSize = MIN(dataLength - dataIndex, BLOCK_SIZE);
+        NSRange range = NSMakeRange(dataIndex, blockSize);
+        NSData *blockData = [data subdataWithRange:range];
+        dataIndex += blockSize;
+        NSData *cdb = [self generateCDBForWrite10:LBA + i withBlockSize:blockSize];
+        [self sendSCSICommand:cdb withData:blockData toSession:session];
+    }
+}
+
+- (NSData *)generateCDBForWrite10:(NSUInteger)lba withBlockSize:(NSUInteger)blockSize {
+    char cdb[10];
+    memset(cdb, 0, sizeof(cdb));
+    cdb[0] = 0x2A; /* Write(10) */
+    cdb[2] = (unsigned char)(lba >> 24) & 0xff;
+    cdb[3] = (unsigned char)(lba >> 16) & 0xff;
+    cdb[4] = (unsigned char)(lba >> 8) & 0xff;
+    cdb[5] = (unsigned char)(lba & 0xff);
+    cdb[7] = (unsigned char)(blockSize >> 8) & 0xff;
+    cdb[8] = (unsigned char)(blockSize & 0xff);
+    return [NSData dataWithBytes:cdb length:sizeof(cdb)];
+}
+
+- (void)sendSCSICommand:(NSData *)cdb withData:(NSData *)data toSession:(EASession *)session {
+    /* Write the CDB to the accessory */
+    [session.outputStream write:[cdb bytes] maxLength:[cdb length]];
+
+    /* Write the data to the accessory */
+    [session.outputStream write:[data bytes] maxLength:[data length]];
+}
+
+
+ExternalAccessory 多扇区读的代码
+
+#import <ExternalAccessory/ExternalAccessory.h>
+
+// 一些常量声明
+#define kEADSessionDataReceivedNotification @"kEADSessionDataReceivedNotification"
+#define kEADSessionDataTransferBytesReceivedKey @"kEADSessionDataTransferBytesReceivedKey"
+#define kEADSessionDataTransferBytesExpectedKey @"kEADSessionDataTransferBytesExpectedKey"
+
+// 声明一个 EAAccessoryDelegate 协议
+@protocol EADSessionControllerDelegate <NSObject>
+
+- (void)receivedData:(NSData *)data;
+
+@end
+
+@interface EADSessionController : NSObject <EAAccessoryDelegate, NSStreamDelegate>
+
+@property (nonatomic, strong) EAAccessory *accessory;
+@property (nonatomic, strong) NSString *protocolString;
+@property (nonatomic, strong) NSMutableData *writeData;
+@property (nonatomic, strong) NSMutableData *readData;
+
+@property (nonatomic, weak) id<EADSessionControllerDelegate> delegate;
+
+- (id)initWithAccessory:(EAAccessory *)accessory forProtocol:(NSString *)protocolString;
+
+- (void)openSession;
+- (void)closeSession;
+- (void)writeData:(NSData *)data;
+
+@end
+
+@implementation EADSessionController
+
+@synthesize accessory = _accessory;
+@synthesize protocolString = _protocolString;
+@synthesize writeData = _writeData;
+@synthesize readData = _readData;
+@synthesize delegate = _delegate;
+
+- (id)initWithAccessory:(EAAccessory *)accessory forProtocol:(NSString *)protocolString
+{
+    self = [super init];
+    if (self) {
+        _accessory = accessory;
+        _protocolString = [protocolString copy];
+    }
+    return self;
+}
+
+- (void)openSession
+{
+    // 建立一个会话并打开输入和输出流
+    _session = [[EASession alloc] initWithAccessory:_accessory forProtocol:_protocolString];
+    if (_session) {
+        _inputStream = [_session inputStream];
+        [_inputStream setDelegate:self];
+        [_inputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+        [_inputStream open];
+        
+        _outputStream = [_session outputStream];
+        [_outputStream setDelegate:self];
+        [_outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+        [_outputStream open];
+    }
+}
+
+- (void)closeSession
+{
+    // 关闭会话
+    [_inputStream close];
+    [_inputStream removeFromRunLoop:[NSRunLoop current
+
+
+
+
+
+首先，您需要导入 ExternalAccessory framework，然后在您的代码中使用 EAAccessory 和 EASession 类。接下来，您可以打开 EASession 并获得输入和输出流，然后使用这些流进行数据读写。
+
+请注意，读写分段数据可能需要一些额外的代码编写和逻辑实现，您需要根据您的需求编写代码。
+
+以下是一些参考代码，但可能需要根据您的实际情况进行修改：
+
+- (void)writeData:(NSData *)data toAccessory:(EAAccessory *)accessory {
+  NSInteger dataLength = [data length];
+  NSInteger numberOfPackets = dataLength / kEADSessionDataTransferMaximumPacketSize;
+  NSInteger lastPacketSize = dataLength % kEADSessionDataTransferMaximumPacketSize;
+  
+  for (NSInteger i = 0; i <= numberOfPackets; i++) {
+    NSInteger thisPacketSize = (i == numberOfPackets) ? lastPacketSize : kEADSessionDataTransferMaximumPacketSize;
+    NSRange packetRange = NSMakeRange(i * kEADSessionDataTransferMaximumPacketSize, thisPacketSize);
+    NSData *packet = [NSData dataWithBytes:[data bytes] + packetRange.location length:packetRange.length];
+    
+    [self.sessionController.outputStream write:[packet bytes] maxLength:[packet length]];
+  }
+}
+
+- (NSData *)readDataFromAccessory:(EAAccessory *)accessory {
+  NSMutableData *data = [NSMutableData data];
+  
+  while ([self.sessionController.inputStream hasBytesAvailable]) {
+    uint8_t buffer[kEADSessionDataTransferMaximumPacketSize];
+    NSInteger bytesRead = [self.sessionController.inputStream read:buffer maxLength:kEADSessionDataTransferMaximumPacketSize];
+    
+    if (bytesRead > 0) {
+      [data appendBytes:buffer length:bytesRead];
+    }
+  }
+  
+  return data;
+
+
+
+
+
+
+
+由于U盘使用的是USB接口，因此读写U盘在iOS上需要使用Core Foundation框架的I/O Kit。以下是一段简单的读写U盘数据的代码：
+
+
+#import <CoreFoundation/CoreFoundation.h>
+#import <IOKit/IOKitLib.h>
+#import <IOKit/IOCFPlugIn.h>
+#import <IOKit/usb/IOUSBLib.h>
+
+-(void)readDataFromUSBMassStorage:(UInt32)location length:(UInt32)length {
+    // 首先创建一个CFPlugIn插件的管理器
+    IOMasterPort(MACH_PORT_NULL, &masterPort);
+    io_iterator_t iterator;
+    
+    // 通过IOServiceGetMatchingServices函数找到所有符合要求的服务
+    kern_return_t kernResult = IOServiceGetMatchingServices(masterPort, IOServiceMatching(kIOUSBDeviceClassName), &iterator);
+    
+    if (kernResult == KERN_SUCCESS) {
+        io_service_t usbDevice;
+        
+        while ((usbDevice = IOIteratorNext(iterator))) {
+            // 创建一个CFPlugIn实例，并获取其IOUSBDeviceInterface
+            io_name_t className;
+            IOCFPlugInInterface **plugInInterface = NULL;
+            SInt32 score;
+            kernResult = IOCreatePlugInInterfaceForService(usbDevice, kIOUSBDeviceUserClientTypeID, kIOCFPlugInInterfaceID, &plugInInterface, &score);
+            
+            if (kernResult == KERN_SUCCESS) {
+                IOUSBDeviceInterface **deviceInterface = NULL;
+                HRESULT result = (*plugInInterface)->QueryInterface(plugInInterface, CFUUIDGetUUIDBytes(kIOUSBDeviceInterfaceID), (LPVOID) &deviceInterface);
+                
+                if (result == S_OK) {
+                    // 读取U盘数据
+                    UInt8 *data = malloc(length);
+                    (*deviceInterface)->USBRead(deviceInterface, location, data, length, &length);
+                    
+                    // 对读取到的数据进行处理
+                    // ...
+                    
+                    // 释放内存
+                    free(data);
+                }
+                
+                // 释放资源
+                (*plugInInterface)->Release(plugInInterface);
+            }
+            
+            // 释放服务
+            IOObjectRelease(usbDevice);
+        }
+    }
+}
+
+-(void)writeDataToUSBMassStorage:(UInt32)location data
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#import "EAAccessoryManager.h"
+#import "EADSessionController.h"
+
+@interface ViewController () <EAAccessoryDelegate, EADSessionDelegate>
+
+@property (nonatomic, strong) EAAccessory *accessory;
+@property (nonatomic, strong) EADSessionController *eadSessionController;
+
+@end
+
+@implementation ViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    // 获取当前连接的配件
+    self.accessory = [[EAAccessoryManager sharedAccessoryManager] connectedAccessories][0];
+    
+    // 初始化会话控制器
+    self.eadSessionController = [[EADSessionController alloc] initWithAccessory:self.accessory forProtocol:@"your.protocol.string"];
+    self.eadSessionController.delegate = self;
+    
+    // 打开会话
+    [self.eadSessionController openSession];
+}
+
+#pragma mark - EADSessionDelegate
+
+- (void)sessionDataReceived:(NSData *)data {
+    // 处理读取到的扇区信息数据
+}
+
+- (void)readSectorWithAddress:(NSUInteger)address {
+    // 定义读取的扇区数量
+    int sectorCount = 1;
+    
+    // 定义读取的扇区数据的字节数
+    int sectorSize = 512;
+    
+    // 定义 SCSI 命令
+    UInt8 readCommand[16];
+    readCommand[0] = 0x28; // 命令码，表示读扇区命令
+    readCommand[1] = 0x00; // 控制字节
+    readCommand[2] = (address >> 24) & 0xff; // 扇区地址高 8 位
+    readCommand[3] = (address >> 16) & 0xff; // 扇区地址中间 8 位
+    readCommand[4] = (address >> 8) & 0xff; // 扇区地址低 8 位
+    readCommand[5] = address & 0xff;
+    readCommand[6] = 0x00; // 以下为不使用的字节
+    readCommand[7] = 0x00;
+    readCommand[8] = 0x00;
+    readCommand[9] = sectorCount; // 读取的扇区数量
+    readCommand[10] = 0x00;
+
+
+
+
+// 创建 EASession 对象
+EASession *session = [[EASession alloc] initWithAccessory:_accessory forProtocol:_protocolString];
+
+// 设置输入输出流
+_inputStream = [session inputStream];
+_outputStream = [session outputStream];
+
+// 打开输入输出流
+[_inputStream open];
+[_outputStream open];
+
+// 定义读取扇区数量
+NSUInteger readSectors = 10;
+
+// 发送 SCSI 命令读取数据
+char cmd[10];
+memset(cmd, 0, sizeof(cmd));
+cmd[0] = 0x28;
+cmd[2] = readSectors >> 24 & 0xff;
+cmd[3] = readSectors >> 16 & 0xff;
+cmd[4] = readSectors >> 8 & 0xff;
+cmd[5] = readSectors & 0xff;
+[_outputStream write:(uint8_t *)cmd maxLength:sizeof(cmd)];
+
+// 分配缓冲区读取数据
+NSMutableData *readData = [NSMutableData dataWithLength:readSectors * 512];
+NSUInteger bytesRead = [_inputStream read:[readData mutableBytes] maxLength:[readData length]];
+
+// 关闭输入输出流
+[_inputStream close];
+[_outputStream close];
+
+// 处理读取的数据
+if (bytesRead == [readData length]) {
+    // 处理读取的数据
+} else {
+    // 处理读取错误
+}
+
+
+
+
+
+- (void) readMultipleSectorsWithLBA:(uint32_t)lba numSectors:(uint32_t)numSectors buffer:(uint8_t *)buffer
+{
+    // Create a SCSI command buffer
+    uint8_t cdb[10];
+    memset(cdb, 0, sizeof(cdb));
+    cdb[0] = 0x28;  // READ(10) opcode
+    cdb[2] = (uint8_
+
+
+
+
+
+
+#import <ExternalAccessory/ExternalAccessory.h>
+
+// 定义访问设备的 EAAccessory 对象
+EAAccessory *accessory;
+
+// 定义访问设备的 EASession 对象
+EASession *session;
+
+// 定义数据读取的次数
+NSInteger numberOfSectorsToRead;
+
+// 获取所有数据并存储在 NSData 对象中
+NSData *data = [NSData dataWithContentsOfURL:[NSURL URLWithString:@"url"]];
+
+// 将 NSData 对象分段读取
+NSRange range;
+for (NSInteger i = 0; i < numberOfSectorsToRead; i++) {
+    range = NSMakeRange(i * sectorSize, sectorSize);
+    NSData *sectorData = [data subdataWithRange:range];
+    
+    // 将数据写入多个扇区
+    [session.outputStream write:[sectorData bytes] maxLength:[sectorData length]];
+}
+
+
+
+
+#import "ExternalAccessory.h"
+
+EAAccessory *accessory;
+EASession *session;
+
+// Connect to the accessory and open a session
+- (void)connect {
+    // Find the first accessory
+    accessory = [[EAAccessoryManager sharedAccessoryManager]
+                 connectedAccessories][0];
+    
+    // Create a session for the accessory
+    session = [[EASession alloc] initWithAccessory:accessory
+                                    forProtocol:@"com.example.protocol"];
+    
+    // Open the session
+    if ([session.inputStream streamStatus] == NSStreamStatusNotOpen) {
+        [session.inputStream open];
+    }
+    if ([session.outputStream streamStatus] == NSStreamStatusNotOpen) {
+        [session.outputStream open];
+    }
+}
+
+// Read data from multiple sectors
+- (void)readMultipleSectors {
+    // Prepare the SCSI command
+    unsigned char command[16];
+    command[0] = 0x28; // SCSI READ10 command
+    command[1] = 0x00;
+    command[2] = (unsigned char)(sector >> 24); // LBA
+    command[3] = (unsigned char)(sector >> 16);
+    command[4] = (unsigned char)(sector >> 8);
+    command[5] = (unsigned char)(sector);
+    command[6] = 0x00;
+    command[7] = (unsigned char)(sectors >> 8); // Transfer length
+    command[8] = (unsigned char)(sectors);
+    command[9] = 0x00;
+    command[10] = 0x00;
+    command[11] = 0x00;
+    command[12] = 0x00;
+    command[13] = 0x00;
+    command[14] = 0x00;
+    command[15] = 0x00;
+    
+    // Write the command to the accessory
+    [session.outputStream write:command maxLength:16];
+    
+    // Read the data from the accessory
+    unsigned char buffer[sectors * 512];
+    [session.inputStream read:buffer maxLength:sectors * 512];
+    
+    // Process the data
+    // ...
+}
+
+
+
+
+#import "ExternalAccessory/ExternalAccessory.h"
+
+//定义多扇区读取的SCSI命令
+const UInt8 kReadCommand[10] = {0x28, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+//设置需要读取的扇区数
+kReadCommand[7] = (UInt8) (numberOfSectors >> 8 & 0xff);
+kReadCommand[8] = (UInt8) (numberOfSectors & 0xff);
+
+//设置读取的起始扇区
+kReadCommand[2] = (UInt8) (startSector >> 24 & 0xff);
+kReadCommand[3] = (UInt8) (startSector >> 16 & 0xff);
+kReadCommand[4] = (UInt8) (startSector >> 8 & 0xff);
+kReadCommand[5] = (UInt8) (startSector & 0xff);
+
+NSData *command = [NSData dataWithBytes:kReadCommand length:sizeof(kReadCommand)];
+
+//发送SCSI命令并读取扇区数据
+NSData *response = [accessory sendSCSICommand:command withResponse:YES];
+
+
+
+
+
+
+NSData *cswData = ...; // 获取 CSW 数据
+UInt8 cswBytes[13];
+[cswData getBytes:cswBytes length:13];
+UInt32 signature = CFSwapInt32LittleToHost(*(UInt32 *)(cswBytes + 0));
+UInt32 tag = CFSwapInt32LittleToHost(*(UInt32 *)(cswBytes + 4));
+UInt32 residue = CFSwapInt32LittleToHost(*(UInt32 *)(cswBytes + 8));
+UInt8 status = cswBytes[12];
+
+if (signature != 'USBS') {
+    // 如果不是有效的 CSW，则跳过
+    return;
+}
+
+// 检查状态字节
+if (status == 0) {
+    // 命令已成功完成
+} else if (status == 1) {
+    // 命令失败
+} else if (status == 2) {
+    // 收到无效的 CDB
+} else if (status == 3) {
+    // 没有收到任何数据
+}
+
+
+
+// 读操作
+- (void)readData {
+    // 发送 SCSI Read10 命令
+    // ...
+
+    // 读取 CSW 数据
+    // ...
+}
+
+// 写操作
+- (void)writeData {
+    // 发送 SCSI Write10 命令
+    // ...
+
+    // 读取 CSW 数据
+    // ...
+}
+
+
+// Send a SCSI read command
+unsigned char cdb[16] = {0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+NSData *cdbData = [NSData dataWithBytes:cdb length:16];
+
+[session.outputStream write:cdbData.bytes maxLength:cdbData.length];
+
+// Read the response from the device
+unsigned char csw[13];
+int bytesRead = [session.inputStream read:csw maxLength:13];
+
+// Check the status in the CSW
+if (csw[12] == 0x00) {
+    // Command succeeded
+} else {
+    // Command failed
+}
+
+
+#define CSW_SIZE 13
+
+int main(int argc, char *argv[]) {
+    unsigned char csw_data[CSW_SIZE];
+
+    // 将 csw_data 数组读入
+    // ...
+
+    // 解析 csw_data
+    unsigned int signature = (csw_data[0] << 24) | (csw_data[1] << 16) | (csw_data[2] << 8) | csw_data[3];
+    if (signature != 0x53425355) {
+        printf("Invalid CSW signature\n");
+        return 1;
+    }
+
+    unsigned int tag = (csw_data[4] << 24) | (csw_data[5] << 16) | (csw_data[6] << 8) | csw_data[7];
+    unsigned int data_residue = (csw_data[8] << 24) | (csw_data[9] << 16) | (csw_data[10] << 8) | csw_data[11];
+    unsigned char status = csw_data[12];
+
+    printf("CSW Tag: 0x%08x\n", tag);
+    printf("Data Residue: %d\n", data_residue);
+    printf("Status: %d\n", status);
+
+    return 0;
+}
+
+
